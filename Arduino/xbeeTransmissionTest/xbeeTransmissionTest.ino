@@ -28,6 +28,7 @@ const int analogInPin = A0;
 int sensorValue = 0; 
 unsigned long int avgValue; 
 float b;
+float calibration=21.89;
 int buf[10],temp;
 
 // interrupt from watchdog
@@ -145,7 +146,7 @@ void loop() {
   for(int i=2;i<8;i++)
   avgValue+=buf[i];
   float pHVol=(float)avgValue*5.0/1024/6;
-  float phValue = -5.70 * pHVol + 21.34;
+  float phValue = -5.70 * pHVol + calibration;
   Serial.print("sensor = ");
   Serial.println(phValue);
   dtostrf(phValue, 1+3, 1, pHBuffer);
