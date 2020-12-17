@@ -1,22 +1,34 @@
-/* Input-side (button) Arduino code */
-#include <stdlib.h>
-#include <dht.h>                //// library for Temp/Humidity Sensor
+#include <SoftwareSerial.h>
 
+#include "DHT.h"
+#include <stdlib.h>
 #include <avr/wdt.h>            // library for default watchdog functions
 #include <avr/interrupt.h>      // library for interrupts handling
 #include <avr/sleep.h>          // library for sleep
 #include <avr/power.h>
 
-#define DHT11_PIN 7     // connect to Temp/Humidity Sensor
+#define DHTPIN 7     
+#define DHTTYPE DHT11 
 #define RELAY_PIN 4     // Pin to switch on/off sensorss
-#define SLEEP_PIN 5     // Connect to DTR on XBee adapter
+#define SLEEP_PIN 5     // Connect to DTR on XBee adapter 
+
 
 // RX: Arduino pin 2, XBee pin DOUT.  
 // TX:  Arduino pin 3, XBee pin DIN
 SoftwareSerial XBee(2, 3);
-dht DHT;
+
+DHT dht(DHTPIN, DHTTYPE);
 int count = 0;
 int nbr_remaining; 
+
+//pH sensor pin P0, Arduino Pin A0
+//pH sensor pin G, Arduino Pin Gnd(Both G pins to Gnd)
+//pH sensor pin V+, Arduino Pin 5V
+const int analogInPin = A0; 
+int sensorValue = 0; 
+unsigned long int avgValue; 
+float b;
+int buf[10],temp;
 
 // interrupt from watchdog
 ISR(WDT_vect)
@@ -65,59 +77,94 @@ void sleep(int ncycles)
 }
 
 
-void setup()
-{
+void setup() {
   pinMode(RELAY_PIN, OUTPUT);
   pinMode(SLEEP_PIN, OUTPUT);
   pinMode(3, OUTPUT);
-  Serial.begin(9600);
-  // Baud rate MUST match XBee settings (as set in XCTU)
-  XBee.begin(9600);
   
+  Serial.begin(9600);
+  Serial.println("DHTxx test!");
+
+  dht.begin();
+
+  XBee.begin(9600);
+
   delay(1000);
   
   // configure the watchdog
   configure_wdt();
 
   Serial.println("Reset");
+  
 }
 
-void loop()
-{
-    Serial.println("Wake"); 
-    digitalWrite(RELAY_PIN, HIGH);
-    digitalWrite(SLEEP_PIN, LOW);
-    delay(2000);
-    
-    int chk = DHT.read11(DHT11_PIN);
-    delay(2000);
-    chk = DHT.read11(DHT11_PIN);
-    
-    char result[100];
+void loop() {
+  Serial.println("Wake"); 
+  digitalWrite(RELAY_PIN, HIGH);
+  digitalWrite(SLEEP_PIN, LOW);
+  
+  delay(2000);
 
-    char tempBuffer[20];
-    char humBuffer[20];
-    Serial.println(DHT.temperature); 
-    Serial.println(DHT.humidity); 
-    double temp = DHT.temperature;///1.7;  //3.3v adustment
-    int hum = DHT.humidity;
+  char result[400]= ".";
+  char tempBuffer[20];
+  char humBuffer[20];
+  char pHBuffer[20];
+  char firstStr[20] = "Temp";
+  
+  int h = dht.readHumidity();
+  double t = dht.readTemperature();
+  
+  if (isnan(h) || isnan(t)) {
+    Serial.println("Failed to read from DHT sensor!");
 
-    dtostrf(temp, 1+3, 1, tempBuffer);
-    dtostrf(hum, 1+3, 1, humBuffer);
+    return;
+  }
 
-    Serial.println(DHT.humidity);
-    
-    sprintf(result, "Temp: %s'C, Humidity: %s%%, Index:", tempBuffer, humBuffer);
+  dtostrf(t, 1+3, 1, tempBuffer);
+  dtostrf(h, 1+3, 1, humBuffer);
 
-    sending(result);
-    delay(50);
-    Serial.println("Sleeping");
-    digitalWrite(SLEEP_PIN, HIGH);
-    digitalWrite(3, LOW);
-    digitalWrite(7, LOW);
-    delay(1000);
-    digitalWrite(RELAY_PIN, LOW);
-    sleep(5);
+  //Code for pH sensor
+  for(int i=0;i<10;i++) 
+  { 
+   buf[i]=analogRead(analogInPin);
+   delay(10);
+  }
+  for(int i=0;i<9;i++)
+  {
+   for(int j=i+1;j<10;j++)
+   {
+    if(buf[i]>buf[j])
+    {
+     temp=buf[i];
+     buf[i]=buf[j];
+     buf[j]=temp;
+    }
+   }
+  }
+  avgValue=0;
+  for(int i=2;i<8;i++)
+  avgValue+=buf[i];
+  float pHVol=(float)avgValue*5.0/1024/6;
+  float phValue = -5.70 * pHVol + 21.34;
+  Serial.print("sensor = ");
+  Serial.println(phValue);
+  dtostrf(phValue, 1+3, 1, pHBuffer);
+  //delay(20);
+
+  sprintf(result, "pH: %s, Temp: %s'C, Humidity: %s%%, Index:", pHBuffer, tempBuffer, humBuffer);
+ 
+  sending(result);
+  //Serial.write(h);
+  XBee.write(t);
+  delay(50);
+  Serial.println("Sleeping");
+  digitalWrite(SLEEP_PIN, HIGH);
+  digitalWrite(3, LOW);
+  digitalWrite(7, LOW);
+  delay(1000);
+  digitalWrite(RELAY_PIN, LOW);
+  sleep(5);
+ 
 }
 
 uint16_t fletcher16(const uint8_t *data, size_t len)
